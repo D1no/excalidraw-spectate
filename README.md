@@ -72,8 +72,9 @@ The UI buttons (🔵) are React components that are rendered on top of the canva
 
 The collaborator elements (🔴) however, though still state managed by ReactJS, are rendered directly inside the canvas. They are not DOM elements, cannot be hidden with CSS and therefore need to be controlled with JavaScript by either
 
-- (A) patch the minified JavaScript code that renders the canvas (hacky, but easy to implement) or
+- (A) patch the minified JavaScript code that renders the canvas (hacky, but easy to implement)
 - (B) dispatching state updates directly to the ReactJS fiber tree (elegant, but more difficult to implement)
+- (C) identifying and use Excalidraw globals outside of the ReactJS scope to change relevant states (limited, but less intrusive)
 
 ## Understanding the Inner-Workings
 
@@ -139,3 +140,145 @@ Here, the ReactJS instance is exposed via `window.__REACT_DEVTOOLS_GLOBAL_HOOK__
 This approach is much more elegant, but requires a lot more effort in understanding how state is managed in Excalidraw and how to dispatch updates against the ReactJS fiber tree.
 
 At the moment, the `App.tsx` file alone [inside](https://github.com/excalidraw/excalidraw/blob/7c9cf30909c6c368407994cb25e22292b99eee5d/src/components/App.tsx) the Excalidraw open source project has _over 8k lines of code_ with almost no comments.... _which is unusual even for veteran ReactJS engineers_. Therefore maybe unreasonable effort to work through just to hide a few elements.
+
+## Approach (C): Excalidraw Globals
+
+Lets compare what globals are available in the Excalidraw web app in the browser compared to an empty iframe (eliminating standard window globals) by running in the console:
+
+```javascript
+(function () {
+  var iframe = document.createElement("iframe");
+  document.body.appendChild(iframe);
+  var standardGlobals = Object.keys(iframe.contentWindow);
+  document.body.removeChild(iframe);
+  var allGlobals = Object.keys(window);
+  var nonStandardGlobals = allGlobals.filter(function (g) {
+    return !(
+      standardGlobals.includes(g) ||
+      g === "iframe" ||
+      g === "standardGlobals" ||
+      g === "nonStandardGlobals"
+    );
+  });
+  console.log(nonStandardGlobals);
+})();
+```
+
+### Globals
+
+All results from 2023-11-21.
+
+#### Excalidraw Local
+
+Cloning the [excalidraw repository](https://github.com/excalidraw/excalidraw) and running `yarn start:production` on the _master_ branch.
+
+_8 app globals_
+
+```javascript
+[
+  "EXCALIDRAW_ASSET_PATH",
+  "EXCALIDRAW_THROTTLE_RENDER",
+  "__EXCALIDRAW_SHA__",
+  // ... rest simple analytics and error reporting (sentry)
+  "__SENTRY__",
+  "scriptEle",
+  "sa_event_loaded",
+  "sa_loaded",
+  "sa_event",
+];
+```
+
+#### Excalidraw Local with Collaboration
+
+Running excalidraw in dev mode via `yarn start` and also cloning the [excalidraw-room repository](https://github.com/excalidraw/excalidraw-room) and running it from the _master_ branch in the background via `yarn start:dev` to have a websocket turn server.
+
+_1 additional app global_
+
+```javascript
+[
+  "collab",
+  // ... since dev mode, lots of debug globals
+];
+```
+
+✅ `collab` provides global access to the [collaborators](https://github.com/excalidraw/excalidraw/blob/7c9cf30909c6c368407994cb25e22292b99eee5d/src/types.ts#L41-L56) state, the [excalidrawAPI](https://github.com/excalidraw/excalidraw/blob/7c9cf30909c6c368407994cb25e22292b99eee5d/src/types.ts#L610) to retrieve and update scene data and many other methods.
+
+<details>
+  <summary>Full list of properties on window.collab</summary>
+
+```javascript
+[
+    "_reactInternalInstance"
+    "_reactInternals",
+    "activeIntervalId",
+    "beforeUnload",
+    "broadcastElements",
+    "collaborators",  // <-- collaborators and with selected ElementIDs
+    "context",
+    "decryptPayload",
+    "destroySocketClient",
+    "excalidrawAPI",  // <-- ExcalidrawAPI to retrieve & update scene data
+    "fallbackInitializationHandler",
+    "fetchImageFilesFromFirebase",
+    "fileManager",
+    "getLastBroadcastedOrReceivedSceneVersion",
+    "getSceneElementsIncludingDeleted",
+    "handleClose",
+    "handleRemoteSceneUpdate",
+    "idleTimeoutId",
+    "initializeIdleDetector",
+    "initializeRoom",
+    "isCollaborating",
+    "lastBroadcastedOrReceivedSceneVersion",
+    "loadImageFiles",
+    "onIdleStateChange",
+    "onOfflineStatusToggle",
+    "onPointerMove",
+    "onPointerUpdate",
+    "onUnload",
+    "onUsernameChange",
+    "onVisibilityChange",
+    "portal",
+    "props",
+    "queueBroadcastAllElements",
+    "queueSaveToFirebase",
+    "reconcileElements",
+    "refs",
+    "reportActive",
+    "reportIdle",
+    "saveCollabRoomToFirebase",
+    "setIsCollaborating",
+    "setLastBroadcastedOrReceivedSceneVersion",
+    "setUsername",
+    "socketInitializationTimer",
+    "startCollaboration",
+    "state",
+    "stopCollaboration",
+    "syncElements",
+    "updater",
+]
+```
+
+</details>
+
+❌ However, it appears that this global is **only available during testing and dev** and not in production mode `excalidraw-app/collab/Collab.tsx` ([here](https://github.com/excalidraw/excalidraw/blob/7c9cf30909c6c368407994cb25e22292b99eee5d/excalidraw-app/collab/Collab.tsx#L175)
+
+```typescript
+if (import.meta.env.MODE === ENV.TEST || import.meta.env.DEV) {
+  window.collab = window.collab || ({} as Window["collab"]);
+  Object.defineProperties(window, {
+    collab: {
+// ...
+```
+
+#### Excalidraw.com
+
+Accessing the website [excalidraw.com](https://excalidraw.com/) in incognito mode and starting a collaboration session with another window.
+
+❌ No `collab`. Only the 8 app globals like in the local version.
+
+### Thoughts
+
+...potentially re-enable the `collab` global in production mode via a chrome extension?
+
+...needs re-tracing of the sourcemap to the conditional in the `Collab.tsx` file.
