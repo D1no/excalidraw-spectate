@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Excalidraw Spectate",
+  "version": "0.0.1",
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "permissions": ["scripting"],
+  "host_permissions": ["https://*/*", "http://*/*"],
+  "action": {},
+  "content_scripts": [
+    {
+      "matches": ["*://*.excalidraw.com/*", "*://localhost/*"],
+      "js": ["preLoadScript.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    }
+  ]
+}
