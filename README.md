@@ -282,3 +282,32 @@ Accessing the website [excalidraw.com](https://excalidraw.com/) in incognito mod
 ...potentially re-enable the `collab` global in production mode via a chrome extension?
 
 ...needs re-tracing of the sourcemap to the conditional in the `Collab.tsx` file.
+
+---
+
+# Implementation Research
+
+Chrome Extension work in a sandboxed environment and cannot access the DOM of the page directly. Instead, they can inject JavaScript and CSS into the page via the `content_scripts` property in the `manifest.json` file.
+
+The newer [Manifest V3](https://developer.chrome.com/docs/extensions/mv3/) is the new standard for Chrome Extensions. This extension will require an up-to-date version of Chrome.
+
+## Running alongside Excalidraw
+
+Content scripts can in MV3 be directly executed within the javascript context of the page by using the `world` property. This allows access to globals and instances without the need to inject a script tag into the dom.
+
+- Chrome Docs on [ExecutionWorld](https://developer.chrome.com/docs/extensions/reference/scripting/#type-ExecutionWorld)
+- Stackoverflow Answer: [Access variables and functions defined in page context from an extension](https://stackoverflow.com/questions/9515704/access-variables-and-functions-defined-in-page-context-from-an-extension/9517879#9517879)
+
+This is relevant for checking if EXCALIDRAW is present by i.e. looking for the `window.EXCALIDRAW_ASSET_PATH` global.
+
+## Loading before Excalidraw
+
+Content scripts can be loaded [at document start](https://developer.chrome.com/docs/extensions/mv3/content_scripts/#run_time), allowing to add code globals and proxied methods.
+
+This allows us to register react dev tool hooks to retrieve the react instance and fiber tree.
+
+## Recording the Canvas
+
+With Chrome version 16 it is possible to handle tab recording in the extension itself via the [MediaStream API](https://developer.chrome.com/docs/extensions/reference/tabCapture/) and an [offscreen document](https://developer.chrome.com/docs/extensions/reference/tabCapture/#usage-restrictions)
+
+This could allow us to record the canvas with a higher resolution and with transparency directly (separating the spectator zoom level from the actual recording).
