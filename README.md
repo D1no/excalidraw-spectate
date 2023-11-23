@@ -287,11 +287,164 @@ Accessing the website [excalidraw.com](https://excalidraw.com/) in incognito mod
 
 # Implementation Research
 
+Understanding the relevant constraints for the implementation.
+
+## Excalidraw
+
+Regarding the inner workings of Excalidraw.
+
+### Inner State
+
+#### Source of `appState`
+
+The app state of Excalidraw is provided via a higher order component called `<ExcalidrawAppStateContext.Provider>` in `App.tsx` ([here](https://github.com/excalidraw/excalidraw/blob/d1e4421823913aacb353a5b52dcd158370bfa96a/src/components/App.tsx#L1217)) as context. And is directly provided to the `<InteractiveCanvas>` component via the `appState` prop.
+
+```tsx
+<AppContext.Provider value={this}>
+  // ...
+  {/* Setting the appState via Context */}
+  <ExcalidrawSetAppStateContext.Provider value={this.setAppState}>
+    {/* Getting the appState from Context */}
+    <ExcalidrawAppStateContext.Provider value={this.state}>
+      // ...
+      <InteractiveCanvas
+        // ...
+        elements={canvasElements}
+        visibleElements={visibleElements}
+        selectedElements={selectedElements}
+        // ...
+        appState={this.state} // <--------- appState from props
+        // ...
+      />
+      // ...
+    </ExcalidrawAppStateContext.Provider>
+  </ExcalidrawSetAppStateContext.Provider>
+  // ...
+</AppContext.Provider>
+```
+
+The corresponding react context hooks are provided as `useExcalidrawAppState` and `useExcalidrawSetAppState` from `App.tsx` ([here](https://github.com/excalidraw/excalidraw/blob/d1e4421823913aacb353a5b52dcd158370bfa96a/src/components/App.tsx#L416-L440))
+
+```typescript
+// App.tsx
+
+const ExcalidrawAppStateContext = React.createContext<AppState>({
+  ...getDefaultAppState(),
+  // ...
+});
+ExcalidrawAppStateContext.displayName = "ExcalidrawAppStateContext";
+
+const ExcalidrawSetAppStateContext = React.createContext<
+  React.Component<any, AppState>["setState"]
+>(() => {
+  console.warn("unitialized ExcalidrawSetAppStateContext context!");
+});
+ExcalidrawSetAppStateContext.displayName = "ExcalidrawSetAppStateContext";
+
+// ...
+
+export const useExcalidrawAppState = () =>
+  useContext(ExcalidrawAppStateContext);
+export const useExcalidrawSetAppState = () =>
+  useContext(ExcalidrawSetAppStateContext);
+```
+
+#### Setting `appState`
+
+In `App.tsx` a method is defined called `setAppState` ([here](https://github.com/excalidraw/excalidraw/blob/d1e4421823913aacb353a5b52dcd158370bfa96a/src/components/App.tsx#L2669-L2674)).
+
+```typescript
+class App extends React.Component<AppProps, AppState> {
+  // ...
+  setAppState: React.Component<any, AppState>["setState"] = (
+    state,
+    callback,
+  ) => {
+    this.setState(state, callback);
+  };
+  // ...
+```
+
+This is also exposed via the `useExcalidrawSetAppState` above. The use of this method is however limited to the `App.tsx` as it seems to just be a co-implementation to the context hooks above.
+
+Many of the internal activities seem to also be done via the ExcalidrawAPI, i.e. in `Collab.tsx` ([here](https://github.com/excalidraw/excalidraw/blob/d1e4421823913aacb353a5b52dcd158370bfa96a/excalidraw-app/collab/Collab.tsx#L149C18-L149C18)).
+
+### Outer Collaboration Protocol (WebSocket, Polling)
+
+Excalidraw uses socketIO to communicate with the websocket turn server. The socket is initialized in `Collab.tsx` ([here](https://github.com/excalidraw/excalidraw/blob/d1e4421823913aacb353a5b52dcd158370bfa96a/excalidraw-app/collab/Collab.tsx#L428-L435)).
+
+```typescript
+      this.portal.socket = this.portal.open(
+        socketIOClient(socketServerData.url, {
+          transports: socketServerData.polling
+            ? ["websocket", "polling"]
+            : ["websocket"],
+        }),
+        roomId,
+        roomKey,
+```
+
+The protocol transports the information related to the collaborators mouse position, usernames and selected elements simply as `MOUSE_LOCATION`, as seen in `data/index.tsx` ([here](https://github.com/excalidraw/excalidraw/blob/d1e4421823913aacb353a5b52dcd158370bfa96a/excalidraw-app/data/index.ts#L106C8-L114)).
+
+```typescript
+export type SocketUpdateDataSource = {
+  // ...
+  MOUSE_LOCATION: {
+    type: "MOUSE_LOCATION";
+    payload: {
+      socketId: string;
+      pointer: { x: number; y: number; tool: "pointer" | "laser" }; // <--
+      button: "down" | "up";
+      selectedElementIds: AppState["selectedElementIds"]; // <--
+      username: string; // <--
+    };
+  };
+  // ...
+};
+```
+
+This payload is parsed in `Collab.tsx` and updated via the excalidrawAPI ([here](https://github.com/excalidraw/excalidraw/blob/d1e4421823913aacb353a5b52dcd158370bfa96a/excalidraw-app/collab/Collab.tsx#L510-L527)).
+
+```typescript
+  case "MOUSE_LOCATION": {
+    const { pointer, button, username, selectedElementIds } =
+      decryptedData.payload; // <-------------------------- Decryption
+    const socketId: SocketUpdateDataSource["MOUSE_LOCATION"]["payload"]["socketId"] =
+      decryptedData.payload.socketId ||
+      // @ts-ignore legacy, see #2094 (#2097)
+      decryptedData.payload.socketID;
+
+
+    const collaborators = new Map(this.collaborators);
+    const user = collaborators.get(socketId) || {}!;
+    user.pointer = pointer;
+    user.button = button;
+    user.selectedElementIds = selectedElementIds;
+    user.username = username;
+    collaborators.set(socketId, user);
+    this.excalidrawAPI.updateScene({
+      collaborators, // <-------------------------- Updated via ExcalidrawAPI
+    });
+```
+
+Blocking the `MOUSE_LOCATION` payload from the websocket would therefore be sufficient to hide the collaborators elements, also avoiding the need to decrypt the payload.
+
+### Changing Excalidraw, Access to API, Collab
+
+If would want to minimally change the codebase to make the integration of a chrome extension easier, we could
+
+- (A) suggest to provide the excalidrawAPI as a global in production mode, potentially as `EXCALIDRAW_API_INSTANCE`
+- (B) to allow the collab global to be available in production mode, potentially as `EXCALIDRAW_COLLAB_INSTANCE`
+
+This would allow use to apply getters and setters on the relevant state directly via the global.
+
+## Chrome Extension
+
 Chrome Extension work in a sandboxed environment and cannot access the DOM of the page directly. Instead, they can inject JavaScript and CSS into the page via the `content_scripts` property in the `manifest.json` file.
 
 The newer [Manifest V3](https://developer.chrome.com/docs/extensions/mv3/) is the new standard for Chrome Extensions. This extension will require an up-to-date version of Chrome.
 
-## Running alongside Excalidraw
+### Running alongside Excalidraw
 
 Content scripts can in MV3 be directly executed within the javascript context of the page by using the `world` property. This allows access to globals and instances without the need to inject a script tag into the dom.
 
@@ -300,14 +453,22 @@ Content scripts can in MV3 be directly executed within the javascript context of
 
 This is relevant for checking if EXCALIDRAW is present by i.e. looking for the `window.EXCALIDRAW_ASSET_PATH` global.
 
-## Loading before Excalidraw
+### Loading before Excalidraw
 
 Content scripts can be loaded [at document start](https://developer.chrome.com/docs/extensions/mv3/content_scripts/#run_time), allowing to add code globals and proxied methods.
 
 This allows us to register react dev tool hooks to retrieve the react instance and fiber tree.
 
-## Recording the Canvas
+### Recording the Canvas
 
 With Chrome version 16 it is possible to handle tab recording in the extension itself via the [MediaStream API](https://developer.chrome.com/docs/extensions/reference/tabCapture/) and an [offscreen document](https://developer.chrome.com/docs/extensions/reference/tabCapture/#usage-restrictions)
 
 This could allow us to record the canvas with a higher resolution and with transparency directly (separating the spectator zoom level from the actual recording).
+
+### Interception of WebSockets
+
+We can potentially intercept the WebSocket connection to the Excalidraw browser by patching the websocket browser method, wrap it in a proxy and simply drop packets related to the collaborators mouse cursor and selected ElementIds. This means, we don't need to interact with react on an instance and fiber basis to influence the specific rendering behavior.
+
+This would be done via a content script, executing before the Excalidraw app is loaded, replacing the default websocket interface with our implementation that filters packets.
+
+- Stackoverflow Answer: [access Websocket traffic from chrome extension](https://stackoverflow.com/a/22871231/2763239)
