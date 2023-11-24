@@ -408,7 +408,7 @@ This payload is parsed in `Collab.tsx` and updated via the excalidrawAPI ([here]
 ```typescript
   case "MOUSE_LOCATION": {
     const { pointer, button, username, selectedElementIds } =
-      decryptedData.payload; // <-------------------------- Decryption
+      decryptedData.payload; // <-------------------From encrypted payload
     const socketId: SocketUpdateDataSource["MOUSE_LOCATION"]["payload"]["socketId"] =
       decryptedData.payload.socketId ||
       // @ts-ignore legacy, see #2094 (#2097)
@@ -427,7 +427,9 @@ This payload is parsed in `Collab.tsx` and updated via the excalidrawAPI ([here]
     });
 ```
 
-Blocking the `MOUSE_LOCATION` payload from the websocket would therefore be sufficient to hide the collaborators elements, also avoiding the need to decrypt the payload.
+Blocking the `MOUSE_LOCATION` payload from the websocket would therefore be sufficient to hide the collaborators elements; problem is that the data is encrypted.
+
+❌ The Problem: The whole payload is a binary blob and not a JSON object. So we cannot simply filter the payload via the chrome extension. We would have to encode and decode again.
 
 ### Changing Excalidraw, Access to API, Collab
 
@@ -472,3 +474,4 @@ We can potentially intercept the WebSocket connection to the Excalidraw browser 
 This would be done via a content script, executing before the Excalidraw app is loaded, replacing the default websocket interface with our implementation that filters packets.
 
 - Stackoverflow Answer: [access Websocket traffic from chrome extension](https://stackoverflow.com/a/22871231/2763239)
+- Stackoverflow Answer: [How can an extension listen to a WebSocket? (and what if the WebSocket is within an iframe?)](https://stackoverflow.com/a/62839570/2763239)
