@@ -43,6 +43,15 @@ _What originally started as a brief look of how to hide a few elements on [Excal
   - [3.3. ReactJS Fiber Tree](#33-reactjs-fiber-tree)
     - [3.3.1. Projects & Resources](#331-projects--resources)
     - [3.3.2. Blog Posts & Articles](#332-blog-posts--articles)
+- [4. Solution](#4-solution)
+  - [4.1. Chrome Extension](#41-chrome-extension)
+    - [4.1.1. Chrome Extension for Life Cycle Management](#411-chrome-extension-for-life-cycle-management)
+    - [4.1.2. Conditionally Render Collaborator Elements](#412-conditionally-render-collaborator-elements)
+    - [4.1.3. Conditionally Render UI](#413-conditionally-render-ui)
+  - [4.2. User Experience](#42-user-experience)
+  - [4.3. Future Ideas](#43-future-ideas)
+    - [4.3.1. Recording the Canvas](#431-recording-the-canvas)
+    - [4.3.2. Onion Skinning](#432-onion-skinning)
 
 <!-- TOC end -->
 
@@ -576,3 +585,93 @@ Noteworthy reads on the ReactJS Fiber Tree in case of interacting with it from t
 - [Exploring React Fiber tree](https://medium.com/@bendtherules/exploring-react-fiber-tree-20cbf62fe808)
 - [How does React traverse Fiber tree internally?](https://jser.dev/react/2022/01/16/fiber-traversal-in-react/)
 - [React Fiber Architecture](https://github.com/acdlite/react-fiber-architecture)
+
+# 4. Solution
+
+Given the implementation angles above, the most promising approach appears to be metaprogramming of the runtime of `Map` for an initial version. This solution doesn't require extensive permissions for the Chrome Extension and also doesn't require any changes to the Excalidraw codebase.
+
+Interacting with the react fiber tree directly is interesting, but requires a lot more effort in traversing the various higher order components and finding the right life cycle states.
+
+## 4.1. Chrome Extension
+
+Adding functionality to Excalidraw without changing the codebase itself.
+
+### 4.1.1. Chrome Extension for Life Cycle Management
+
+We will make use of content scripts and their ability to run in the same context as the page itself to integrate relevant life cycle hooks. Than, outside of the main thread, we can use signals to communicate with the extension itself and freely integrate our features.
+
+### 4.1.2. Conditionally Render Collaborator Elements
+
+The following example code, when run before the Excalidraw app is loaded, will wrap the `Map` constructor in a proxy and intercept the `set` method. This allows us to filter the `pointer` and `selectedElementIds` before they are set on the collaborator state; essentially just withholding that information for canvas rendering.
+
+```javascript
+const EXCALIDRAW_HIDE_POINTER = true;
+const EXCALIDRAW_HIDE_SELECTED_ELEMENTS = true;
+
+// Check i.e. for a fragment like #spectate to proxy when necessary.
+
+const OriginalMap = Map;
+
+window.Map = new Proxy(OriginalMap, {
+  construct(target, args) {
+    const originalMapInstance = new target(...args);
+
+    const originalSet = originalMapInstance.set;
+
+    // Wrap the original 'set' method
+    originalMapInstance.set = function (key, value) {
+      // Check if we need to even take a look at this operation
+      if (EXCALIDRAW_HIDE_POINTER || EXCALIDRAW_HIDE_SELECTED_ELEMENTS) {
+        // Check if key is string and value is an object
+        if (typeof key === "string" && typeof value === "object") {
+          // Check if value has pointer and selectedElementIds properties
+          // and delete accordingly.
+
+          if (EXCALIDRAW_HIDE_POINTER && "pointer" in value) {
+            delete value.pointer;
+          }
+
+          if (
+            EXCALIDRAW_HIDE_SELECTED_ELEMENTS &&
+            "selectedElementIds" in value
+          ) {
+            delete value.selectedElementIds;
+          }
+        }
+      }
+
+      return originalSet.call(this, key, value);
+    };
+
+    // Return the modified map instance directly
+    return originalMapInstance;
+  },
+});
+```
+
+### 4.1.3. Conditionally Render UI
+
+To hide the UI elements, we can directly identify them via dom nodes and hide them with CSS. Eventually we can fire keyboard shortcuts ourself to activate view and zen mode; limiting the UI elements to be hidden.
+
+## 4.2. User Experience
+
+To avoid having to pin the extension to the tool bar, we can make use of the [chrome.declarativeContent API](https://developer.chrome.com/docs/extensions/reference/declarativeContent/) to automatically show the extension when the user is on the whiteboard.
+
+We can also completely integrate it onto the creators screen (i.e. triangle in the top right corner) that when clicked
+
+- prompts the user to activate collaboration mode
+- when a `#room` fragment is detected in the url, offer to create a spectator window (and warn to disable pop-up blockers)
+- that spectator window should be a pop-up since it has smaller bezels
+- open that window with an additional fragment attached to the url to signal the extension to activate spectator mode on that window (and potentially other features)
+
+## 4.3. Future Ideas
+
+### 4.3.1. Recording the Canvas
+
+After this, we can explore capturing the canvas element via the [MediaStream API](https://developer.chrome.com/docs/extensions/reference/tabCapture/) and an [offscreen document](https://developer.chrome.com/docs/extensions/reference/tabCapture/#usage-restrictions), potentially remapping its size to with a higher resolution.
+
+From a workload perspective, we should be able to do this in a WebWorker allowing us to implement more intelligent capture features like only recording collaborator events, track mouse movements as a separate layer and record the canvas with "infinite" size by chunking recorded bitmaps to current relative coordinates.
+
+### 4.3.2. Onion Skinning
+
+It is likely possible to track the scenes element state in a similar metaprogramming fashion, allowing us to introduce hooks to change i.e. the transparency of elements in the spectator view to zero if they are below a certain threshold.
