@@ -48,6 +48,7 @@ _What originally started as a brief look of how to hide a few elements on [Excal
     - [4.1.1. Chrome Extension for Life Cycle Management](#411-chrome-extension-for-life-cycle-management)
     - [4.1.2. Conditionally Render Collaborator Elements](#412-conditionally-render-collaborator-elements)
     - [4.1.3. Conditionally Render UI](#413-conditionally-render-ui)
+    - [4.1.4. Controlling Color](#414-controlling-color)
   - [4.2. User Experience](#42-user-experience)
   - [4.3. Future Ideas](#43-future-ideas)
     - [4.3.1. Recording the Canvas](#431-recording-the-canvas)
@@ -652,6 +653,134 @@ window.Map = new Proxy(OriginalMap, {
 ### 4.1.3. Conditionally Render UI
 
 To hide the UI elements, we can directly identify them via dom nodes and hide them with CSS. Eventually we can fire keyboard shortcuts ourself to activate view and zen mode; limiting the UI elements to be hidden.
+
+### 4.1.4. Controlling Color
+
+The cursor color, or rather the color of each user, is derived from the the client or socketid via a heuristic in `clients.ts` as `getClientColor` via an `hashToInteger` algorithm ([here](https://github.com/excalidraw/excalidraw/blob/fe75f29c15d8bcbb787ab6fdd8ce810167bf7f94/src/clients.ts#L1-L29)).
+
+```typescript
+function hashToInteger(id: string) {
+  let hash = 0;
+  if (id.length === 0) {
+    return hash;
+  }
+  for (let i = 0; i < id.length; i++) {
+    const char = id.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+  }
+  return hash;
+}
+
+export const getClientColor = (
+  /**
+   * any uniquely identifying key, such as user id or socket id
+   */
+  id: string
+) => {
+  // to get more even distribution in case `id` is not uniformly distributed to
+  // begin with, we hash it
+  const hash = Math.abs(hashToInteger(id));
+  // we want to get a multiple of 10 number in the range of 0-360 (in other
+  // words a hue value of step size 10). There are 37 such values including 0.
+  const hue = (hash % 37) * 10;
+  const saturation = 100;
+  const lightness = 83;
+
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+};
+```
+
+This function is than used inside of `renderScene.ts` to paint the remote cursors with the color derived from the id ([here](https://github.com/excalidraw/excalidraw/blob/fe75f29c15d8bcbb787ab6fdd8ce810167bf7f94/src/renderer/renderScene.ts#L730-L751):
+
+```typescript
+  // Paint remote pointers
+  for (const clientId in renderConfig.remotePointerViewportCoords) {
+    let { x, y } = renderConfig.remotePointerViewportCoords[clientId];
+
+    // ...
+
+    const background = getClientColor(clientId); // <--- Color derived from id
+
+    // ...
+    context.strokeStyle = background;
+    context.fillStyle = background;
+```
+
+To ensure that always the same color is used for rendering the cursor, we can simply stochastically retrieve an `id` that falls into a certain hue color block (there are only 37 options). This is especially important for recording videos, to make sure we are not on rainbow road when multiple takes a spliced together (changing cursor colors due to new socket ids).
+
+```typescript
+// Collapsed algorithm from the Excalidraw logic to evaluate against.
+function hashToIntegerHueDeciBlock(id: string): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    const char = id.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+  }
+  return Math.abs(hash) % 37;
+}
+
+// Finds a new ID that has the desired hue color space in blocks of 10 at a time complexity of O(nk) where n is the number of existing IDs and k the number of iterations needed to find a unique ID which depends on the target length.
+// This is not deterministic but finding a new ID against 10 existing IDs with a length of 20 takes about 3ms.
+function generateUniqueIdForTargetHueDeciBlock(
+  targetHueDeciBlock: number,
+  existingIds: string[],
+  idLength: number,
+  debug: boolean = false
+): string | null {
+  if (targetHueDeciBlock < 0 || targetHueDeciBlock > 36 || idLength < 1) {
+    console.error("Out of bounds in targetHueDeciBlock or invalid idLength");
+    return null;
+  }
+
+  const letters = "abcdefghijklmnopqrstuvwxyz";
+  const numbers = "0123456789";
+  const allChars = letters + numbers;
+  let newId = "";
+  let iterationCount = 0;
+
+  let startTime;
+  if (debug) {
+    startTime = performance.now();
+  }
+
+  while (true) {
+    iterationCount++;
+    // Start with a letter to make sure we don't get any JS type casting surprises
+    newId = letters.charAt(Math.floor(Math.random() * letters.length));
+    for (let i = 1; i < idLength; i++) {
+      // Start from 1 because the first char is already a letter
+      newId += allChars.charAt(Math.floor(Math.random() * allChars.length));
+    }
+
+    // Check if the new ID is unique to the whole set and has the desired HeuDeci value
+    if (
+      !existingIds.includes(newId) &&
+      hashToIntegerHueDeciBlock(newId) === targetHueDeciBlock
+    ) {
+      if (debug) {
+        const endTime = performance.now();
+
+        console.log(
+          `Found for Hue ${targetHueDeciBlock * 10} the new ID: ${newId}`
+        );
+        console.log(
+          `Iterations: ${iterationCount} against ${existingIds.length} existing IDs`
+        );
+        console.log(`Time taken: ${(endTime - startTime).toFixed(2)} ms`);
+      }
+      // Leaving the loop
+      break;
+    }
+  }
+
+  // Return the new ID
+  return newId;
+}
+```
+
+We can shift the key with the same `Map` hook, memoize it and potentially offer the option to apply a color to specific usernames. As our hook only influencing render states by matching the collaborators shape, we are behind the socketIO life cycle meaning we only interact with its intermediary state representation.
+
+_This is obviously a bit insane, but ok for an initial "I'm on an island, can't involve anybody"-version._
 
 ## 4.2. User Experience
 
