@@ -96,7 +96,7 @@ function generateUniqueIdForTargetHueDeciBlock(
 // Color Ids
 const SPECTATOR_ID_TO_COLOR_ID = new Map();
 const SPECTATOR_COLOR_ID_TO_ID_WITH_SPEC = new Map();
-const SPECTATOR_TARGET_HUE_DECI_BLOCK = 33;
+const SPECTATOR_TARGET_HUE_DECI_BLOCK = 3;
 
 const prefixOfTuchedIds = "SPEC";
 const idLength = 20;
@@ -104,6 +104,7 @@ const idLength = 20;
 function replaceIdForColorId(id) {
   if (id.startsWith(prefixOfTuchedIds)) {
     console.log("Already touched key. Returning:", id);
+    // TODO: Add ability to change color map to new target hue deci block and delete old ColorKey. Otherwise we would have a memory leak as soon it is possible to change colors in an instance.
     return id;
   } else if (SPECTATOR_ID_TO_COLOR_ID.has(id)) {
     const existingId = SPECTATOR_ID_TO_COLOR_ID.get(id);
@@ -143,35 +144,13 @@ const OriginalMap = Map;
 
 window.Map = new Proxy(OriginalMap, {
   construct(target, args) {
-    // Check if any arguments were passed
-    if (args.length > 0) {
-      let initArg = args[0];
-
-      // Check if is a map
-      if (initArg instanceof Map) {
-        // check if it has entries
-        if (initArg.size > 0) {
-          // check if the first key is a string
-          firstKey = initArg.keys().next().value;
-          if (typeof firstKey === "string") {
-            // heuristic: check if the key is the length of what we expect for an original ID
-            if (firstKey.length >= expectedMinLengthOrgID) {
-              console.log("Map instantiated with:", initArg);
-
-              // TODO Replacing keys with color IDs
-
-            }
-          }
-        }
-      }
-    }
-
     const originalMapInstance = new target(...args);
 
     const originalSet = originalMapInstance.set;
 
     // Wrap the original 'set' method
-    originalMapInstance.set = function (key, value, skip = false) {
+    // TODO: Decide if we want to only proxy on the value retrieval side, deleting the set method.
+    originalMapInstance.set = function (key, value) {
       // Check if we need to even take a look at this operation
       if (
         EXCALIDRAW_HIDE_POINTER ||
@@ -185,6 +164,7 @@ window.Map = new Proxy(OriginalMap, {
           // and delete accordingly.
 
           if ("pointer" in value) {
+            // TODO: Split into a call for changing the target hue of a particular ID and patching the ID. This was we can look for certain user names etc and assign them colors.
             key = replaceIdForColorId(key);
           }
 
@@ -204,6 +184,31 @@ window.Map = new Proxy(OriginalMap, {
       }
 
       return originalSet.call(this, key, value);
+    };
+
+    const originalForEach = originalMapInstance.forEach;
+
+    // Wrap the original 'forEach' method
+    // Used for rendering to canvas. We ignore get for now.
+    originalMapInstance.forEach = function (originalCallback, thisArg) {
+      const wrappedCallback = (value, key, map) => {
+        let modifiedKey = key;
+        // Check if key is string and value is an object
+        if (typeof key === "string" && typeof value === "object") {
+          // Check if the string is likely an ID
+          // TODO: Not sure if this is enough; we should avoid accidentily changing other strings.
+          if (key.length >= expectedMinLengthOrgID) {
+            // Replace the returning key.
+            modifiedKey = replaceIdForColorId(key);
+          }
+        }
+
+        // Call the original callback function with modified arguments
+        originalCallback.call(thisArg, value, modifiedKey, map);
+      };
+
+      // Call the original 'forEach' method with the wrapped callback to keep its context
+      return originalForEach.call(this, wrappedCallback, thisArg);
     };
 
     // Return the modified map instance directly
