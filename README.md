@@ -656,7 +656,22 @@ To hide the UI elements, we can directly identify them via dom nodes and hide th
 
 ### 4.1.4. Controlling Color
 
-The cursor color, or rather the color of each user, is derived from the the client or socketid via a heuristic in `clients.ts` as `getClientColor` via an `hashToInteger` algorithm ([here](https://github.com/excalidraw/excalidraw/blob/fe75f29c15d8bcbb787ab6fdd8ce810167bf7f94/src/clients.ts#L1-L29)).
+The `Collaborator` type in `src/types.ts` ([here](https://github.com/excalidraw/excalidraw/blob/fe75f29c15d8bcbb787ab6fdd8ce810167bf7f94/src/types.ts#L44-L59)) has a `color` property.
+
+```typescript
+export type Collaborator = {
+  // ...
+  color?: {
+    background: string;
+    stroke: string;
+  };
+  // ..
+};
+```
+
+This property is however not used in the rendering of the cursor apparently. So how is the color determined?
+
+The cursor color, or rather the color of each user, is derived by default from the the client or socketid via a heuristic in `clients.ts` as `getClientColor` via an `hashToInteger` algorithm ([here](https://github.com/excalidraw/excalidraw/blob/fe75f29c15d8bcbb787ab6fdd8ce810167bf7f94/src/clients.ts#L1-L29)).
 
 ```typescript
 function hashToInteger(id: string) {
