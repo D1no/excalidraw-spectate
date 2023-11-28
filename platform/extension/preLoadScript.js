@@ -196,8 +196,18 @@ window.Map = new Proxy(OriginalMap, {
         // Check if key is string and value is an object
         if (typeof key === "string" && typeof value === "object") {
           // Check if the string is likely an ID
-          // TODO: Not sure if this is enough; we should avoid accidentily changing other strings.
-          if (key.length >= expectedMinLengthOrgID) {
+
+          // NOTE: Without the matchers, we would also mutate firebase keys. These matchers are from
+          // https://github.com/excalidraw/excalidraw/blob/7c9cf30909c6c368407994cb25e22292b99eee5d/src/types.ts#L41-L56
+          if (
+            key.length >= expectedMinLengthOrgID &&
+            ("pointer" in value ||
+              "button" in value ||
+              "selectedElementIds" in value ||
+              "username" in value ||
+              "userState" in value || // <- Likely most reliable one
+              "avatarUrl" in value)
+          ) {
             // Replace the returning key.
             modifiedKey = replaceIdForColorId(key);
           }
