@@ -1,4 +1,4 @@
-const SPECTATOR_HIDE_POINTER = true;
+const SPECTATOR_HIDE_POINTER = false;
 const SPECTATOR_HIDE_USERNAME = true;
 const SPECTATOR_HIDE_SELECTED_ELEMENTS = true;
 
@@ -231,6 +231,7 @@ if (SPECTATOR_FORCE_ACTIVE || checkIfSpectatorMode()) {
       };
 
       // TODO: This means, we need to reload the window if settings change
+      // TODO: This doesn't work on Excalidraw Plus.
       if (!SPECTATOR_NO_COLOR) {
         const originalForEach = originalMapInstance.forEach;
 

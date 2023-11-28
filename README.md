@@ -669,7 +669,7 @@ export type Collaborator = {
 };
 ```
 
-This property is however not used in the rendering of the cursor apparently. So how is the color determined?
+This property is however not used in the rendering of the cursor on the local and free version of excalidraw. It is probably used in the plus version in some way. So how is the color determined?
 
 The cursor color, or rather the color of each user, is derived by default from the the client or socketid via a heuristic in `clients.ts` as `getClientColor` via an `hashToInteger` algorithm ([here](https://github.com/excalidraw/excalidraw/blob/fe75f29c15d8bcbb787ab6fdd8ce810167bf7f94/src/clients.ts#L1-L29)).
 
