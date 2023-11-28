@@ -96,7 +96,10 @@ function generateUniqueIdForTargetHueDeciBlock(
 // Color Ids
 const SPECTATOR_ID_TO_COLOR_ID = new Map();
 const SPECTATOR_COLOR_ID_TO_ID_WITH_SPEC = new Map();
-const SPECTATOR_TARGET_HUE_DECI_BLOCK = 3;
+// Color 21: Light Blue
+// Darker Blue: 24
+// Color 0: Red
+const SPECTATOR_TARGET_HUE_DECI_BLOCK = 0;
 
 const prefixOfTuchedIds = "SPEC";
 const idLength = 20;
@@ -220,6 +223,47 @@ window.Map = new Proxy(OriginalMap, {
       // Call the original 'forEach' method with the wrapped callback to keep its context
       return originalForEach.call(this, wrappedCallback, thisArg);
     };
+
+    supportLaserPointer = false;
+    // Right now the laser pointer can flip to the orgID for color, since we don't
+    // intercept on the constructor side.
+    if (supportLaserPointer) {
+      // Used in LaserPointer Tool here:
+      // https://github.com/excalidraw/excalidraw/blob/dd220bcaea1678a85453b3af900fe3fae0e3481e/src/components/LaserTool/LaserPathManager.ts#L255-L279
+      // This is not enough - need more than just entries as it uses has etc.
+      const originalEntries = originalMapInstance.entries;
+
+      // Wrap the original 'entries' method
+      originalMapInstance.entries = function () {
+        const iterator = originalEntries.call(this);
+        return {
+          next: () => {
+            const result = iterator.next();
+            if (result.done) return result;
+
+            let [key, value] = result.value;
+            if (typeof key === "string" && typeof value === "object") {
+              // Your logic to check the key and value
+              if (
+                key.length >= expectedMinLengthOrgID &&
+                ("pointer" in value ||
+                  "button" in value ||
+                  "selectedElementIds" in value ||
+                  "username" in value ||
+                  "userState" in value ||
+                  "avatarUrl" in value)
+              ) {
+                key = replaceIdForColorId(key);
+              }
+            }
+            return { value: [key, value], done: false };
+          },
+          [Symbol.iterator]: function () {
+            return this;
+          },
+        };
+      };
+    }
 
     // Return the modified map instance directly
     return originalMapInstance;
