@@ -1,14 +1,23 @@
-const SPECTATOR_HIDE_POINTER = false;
+const SPECTATOR_HIDE_POINTER = true;
 const SPECTATOR_HIDE_USERNAME = true;
 const SPECTATOR_HIDE_SELECTED_ELEMENTS = true;
+
+const SPECTATOR_NO_COLOR =
+  SPECTATOR_HIDE_POINTER &&
+  SPECTATOR_HIDE_USERNAME &&
+  SPECTATOR_HIDE_SELECTED_ELEMENTS;
+
 const SPECTATOR_DEBUG = false;
 const SPECTATOR_URL_FRAGMENT = ",spectate";
+// TODO: Don't force spectator mode
+const SPECTATOR_FORCE_ACTIVE = true;
 
 /******************************************************************************
  * Check if we want to run the script based on the url. Only continue if there is
  * ",spectate" in the url.
  */
 
+// TODO: This is not ideal, since the page needs a hard reload to get into spectator mode.
 function checkIfSpectatorMode(ourFragment = SPECTATOR_URL_FRAGMENT) {
   const url = window.location.href;
   if (url.includes(ourFragment)) {
@@ -16,11 +25,23 @@ function checkIfSpectatorMode(ourFragment = SPECTATOR_URL_FRAGMENT) {
     window.history.replaceState(null, null, url.replace(ourFragment, ""));
     return true;
   } else {
+    // Not in spectator mode
     return false;
   }
 }
 
-if (checkIfSpectatorMode()) {
+if (SPECTATOR_FORCE_ACTIVE || checkIfSpectatorMode()) {
+  /******************************************************************************
+   * Add class to root node to hide UI elements with css selectors
+   */
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const excalidrawAppDiv = document.querySelector("#root");
+    if (excalidrawAppDiv) {
+      excalidrawAppDiv.classList.add("spectating");
+    }
+  });
+
   /******************************************************************************
    * Generate ID for Target Color
    */
@@ -109,6 +130,7 @@ if (checkIfSpectatorMode()) {
 
   /******************************************************************************
    * Replace ID for Color
+   * TODO: This doesn't work on Excalidraw Plus
    */
 
   // Color Ids
@@ -117,7 +139,7 @@ if (checkIfSpectatorMode()) {
   // Color 21: Light Blue
   // Darker Blue: 24
   // Color 0: Red
-  const SPECTATOR_TARGET_HUE_DECI_BLOCK = 0;
+  const SPECTATOR_TARGET_HUE_DECI_BLOCK = 21;
 
   const prefixOfTuchedIds = "SPEC";
   const idLength = 20;
@@ -183,9 +205,11 @@ if (checkIfSpectatorMode()) {
             // Check if value has pointer and selectedElementIds properties
             // and delete accordingly.
 
-            if ("pointer" in value) {
-              // TODO: Split into a call for changing the target hue of a particular ID and patching the ID. This was we can look for certain user names etc and assign them colors.
-              key = replaceIdForColorId(key);
+            if (!SPECTATOR_NO_COLOR) {
+              if ("pointer" in value) {
+                // TODO: Split into a call for changing the target hue of a particular ID and patching the ID. This was we can look for certain user names etc and assign them colors.
+                key = replaceIdForColorId(key);
+              }
             }
 
             if (SPECTATOR_HIDE_POINTER && "pointer" in value) {
@@ -206,40 +230,43 @@ if (checkIfSpectatorMode()) {
         return originalSet.call(this, key, value);
       };
 
-      const originalForEach = originalMapInstance.forEach;
+      // TODO: This means, we need to reload the window if settings change
+      if (!SPECTATOR_NO_COLOR) {
+        const originalForEach = originalMapInstance.forEach;
 
-      // Wrap the original 'forEach' method
-      // Used for rendering to canvas. We ignore get for now.
-      originalMapInstance.forEach = function (originalCallback, thisArg) {
-        const wrappedCallback = (value, key, map) => {
-          let modifiedKey = key;
-          // Check if key is string and value is an object
-          if (typeof key === "string" && typeof value === "object") {
-            // Check if the string is likely an ID
+        // Wrap the original 'forEach' method
+        // Used for rendering to canvas. We ignore get for now.
+        originalMapInstance.forEach = function (originalCallback, thisArg) {
+          const wrappedCallback = (value, key, map) => {
+            let modifiedKey = key;
+            // Check if key is string and value is an object
+            if (typeof key === "string" && typeof value === "object") {
+              // Check if the string is likely an ID
 
-            // NOTE: Without the matchers, we would also mutate firebase keys. These matchers are from
-            // https://github.com/excalidraw/excalidraw/blob/7c9cf30909c6c368407994cb25e22292b99eee5d/src/types.ts#L41-L56
-            if (
-              key.length >= expectedMinLengthOrgID &&
-              ("pointer" in value ||
-                "button" in value ||
-                "selectedElementIds" in value ||
-                "username" in value ||
-                "userState" in value || // <- Likely most reliable one
-                "avatarUrl" in value)
-            ) {
-              // Replace the returning key.
-              modifiedKey = replaceIdForColorId(key);
+              // NOTE: Without the matchers, we would also mutate firebase keys. These matchers are from
+              // https://github.com/excalidraw/excalidraw/blob/7c9cf30909c6c368407994cb25e22292b99eee5d/src/types.ts#L41-L56
+              if (
+                key.length >= expectedMinLengthOrgID &&
+                ("pointer" in value ||
+                  "button" in value ||
+                  "selectedElementIds" in value ||
+                  "username" in value ||
+                  "userState" in value || // <- Likely most reliable one
+                  "avatarUrl" in value)
+              ) {
+                // Replace the returning key.
+                modifiedKey = replaceIdForColorId(key);
+              }
             }
-          }
 
-          // Call the original callback function with modified arguments
-          originalCallback.call(thisArg, value, modifiedKey, map);
+            // Call the original callback function with modified arguments
+            originalCallback.call(thisArg, value, modifiedKey, map);
+          };
+
+          // Call the original 'forEach' method with the wrapped callback to keep its context
+          return originalForEach.call(this, wrappedCallback, thisArg);
         };
-
-        // Call the original 'forEach' method with the wrapped callback to keep its context
-        return originalForEach.call(this, wrappedCallback, thisArg);
-      };
+      }
 
       supportLaserPointer = false;
       // Right now the laser pointer can flip to the orgID for color, since we don't
